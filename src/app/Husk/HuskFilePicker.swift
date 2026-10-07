@@ -16,7 +16,7 @@ enum HuskFilePicker {
     static func present(types: [UTType] = [.item], multiple: Bool = true,
                         onPick: @escaping ([URL]) -> Void, onFail: ((String) -> Void)? = nil) {
         guard live == nil else { return }
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
         picker.allowsMultipleSelection = multiple
         let coordinator = Coordinator(onPick: onPick)
         picker.delegate = coordinator

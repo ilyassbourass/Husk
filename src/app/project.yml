@@ -74,8 +74,8 @@ targets:
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/Frameworks"
-        # Husk targets recent iPhones only; a real Android guest needs the RAM.
-        TARGETED_DEVICE_FAMILY: "1"
+        # Husk targets iPhones and iPads (iPads provide 8-16GB RAM for heavy Android workloads)
+        TARGETED_DEVICE_FAMILY: "1,2"
         # XcodeGen links the dylib by -l, so the linker needs a library search
         # path (not just the framework search path it infers from the file).
         LIBRARY_SEARCH_PATHS:

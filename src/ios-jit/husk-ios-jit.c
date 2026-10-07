@@ -354,6 +354,29 @@ static HuskDualMapping husk_ios_jit_allocate_real(size_t bytes)
     uint64_t probe = husk_brk_probe();
     g_expecting_jit_trap = false;
     if (probe == 0) {
+        /* If StikDebug is not servicing traps, check if process can map executable memory directly (TrollStore / Dopamine) */
+        void *direct_rx = mmap(NULL, bytes, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
+        if (direct_rx != MAP_FAILED) {
+            vm_address_t alias = 0;
+            vm_prot_t cur, max;
+            kern_return_t kr = vm_remap(mach_task_self(), &alias, bytes, 0,
+                                        VM_FLAGS_ANYWHERE, mach_task_self(),
+                                        (vm_address_t)direct_rx, FALSE, &cur, &max, VM_INHERIT_NONE);
+            if (kr == KERN_SUCCESS &&
+                vm_protect(mach_task_self(), alias, bytes, FALSE, VM_PROT_READ | VM_PROT_WRITE) == KERN_SUCCESS) {
+                region.rx_addr = direct_rx;
+                region.rw_addr = (void *)alias;
+                region.size = bytes;
+                if (husk_ios_jit_selftest(&region)) {
+                    HUSK_LOG("#%llu: granted %zu bytes via direct vm_remap (TrollStore/jailbreak mode)",
+                             (unsigned long long)n, bytes);
+                    atomic_store(&g_jit_available, true);
+                    return region;
+                }
+                vm_deallocate(mach_task_self(), alias, bytes);
+            }
+            munmap(direct_rx, bytes);
+        }
         HUSK_LOG("#%llu: StikDebug is NOT servicing traps -- probe returned 0, which "
                  "is our own SIGTRAP handler stepping over an unanswered brk. "
                  "Cannot allocate %zu bytes.",
@@ -566,6 +589,14 @@ bool husk_ios_jit_mapjit_works(void)
 
     void *p = mmap(NULL, len, PROT_READ | PROT_WRITE | PROT_EXEC,
                    MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
+    bool direct_rx = false;
+    if (p == MAP_FAILED) {
+        /* Fallback for TrollStore / Dopamine: attempt direct PROT_READ | PROT_EXEC */
+        p = mmap(NULL, len, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
+        if (p != MAP_FAILED) {
+            direct_rx = true;
+        }
+    }
     if (p == MAP_FAILED) {
         HUSK_LOG("MAP_JIT probe: mmap refused (%s) -- no executable memory this "
                  "way; a trap servicer is the only route on this device",
@@ -592,17 +623,33 @@ bool husk_ios_jit_mapjit_works(void)
 
     g_probe_running = 1;
     if (sigsetjmp(g_probe_jump, 1) == 0) {
-        // On a device with APRR the page is write-protected until asked
-        // otherwise; on one without, it is plain RWX and these are no-ops.
-        // The guard covers the write as well as the call, so a page that
-        // refuses either fails the probe rather than the process.
-        if (jit_write_protect_supported()) { jit_write_protect(0); }
-        memcpy(p, kCode, sizeof(kCode));
-        if (jit_write_protect_supported()) { jit_write_protect(1); }
-        sys_icache_invalidate(p, sizeof(kCode));
+        if (direct_rx) {
+            vm_address_t alias = 0;
+            vm_prot_t cur, max;
+            kern_return_t kr = vm_remap(mach_task_self(), &alias, len, 0,
+                                        VM_FLAGS_ANYWHERE, mach_task_self(),
+                                        (vm_address_t)p, FALSE, &cur, &max, VM_INHERIT_NONE);
+            if (kr == KERN_SUCCESS &&
+                vm_protect(mach_task_self(), alias, len, FALSE, VM_PROT_READ | VM_PROT_WRITE) == KERN_SUCCESS) {
+                memcpy((void *)alias, kCode, sizeof(kCode));
+                vm_deallocate(mach_task_self(), alias, len);
+                sys_icache_invalidate(p, sizeof(kCode));
+                int (*fn)(void) = (int (*)(void))p;
+                ok = (fn() == 0x1234);
+            }
+        } else {
+            // On a device with APRR the page is write-protected until asked
+            // otherwise; on one without, it is plain RWX and these are no-ops.
+            // The guard covers the write as well as the call, so a page that
+            // refuses either fails the probe rather than the process.
+            if (jit_write_protect_supported()) { jit_write_protect(0); }
+            memcpy(p, kCode, sizeof(kCode));
+            if (jit_write_protect_supported()) { jit_write_protect(1); }
+            sys_icache_invalidate(p, sizeof(kCode));
 
-        int (*fn)(void) = (int (*)(void))p;
-        ok = (fn() == 0x1234);
+            int (*fn)(void) = (int (*)(void))p;
+            ok = (fn() == 0x1234);
+        }
     } else {
         HUSK_LOG("MAP_JIT probe: faulted while executing the page -- the mapping "
                  "was granted but is not executable");

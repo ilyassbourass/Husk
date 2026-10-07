@@ -251,19 +251,36 @@ void tl_atomic_abandon(int fd)
     free(real);
 }
 
-/* After fd was closed: give a new file the name of the one it replaces. */
-void tl_atomic_closed(int fd)
+/* Detach the atomic path before closing the descriptor to avoid descriptor recycling races. */
+char *tl_atomic_detach(int fd)
 {
-    if (fd < 0 || fd >= 4096) return;
+    if (fd < 0 || fd >= 4096) return NULL;
     pthread_mutex_lock(&g_atomic_lock);
     char *real = g_atomic[fd];
     g_atomic[fd] = NULL;
     pthread_mutex_unlock(&g_atomic_lock);
+    return real;
+}
+
+void tl_atomic_commit(char *real, bool success)
+{
     if (!real) return;
     char tmp[1100];
     snprintf(tmp, sizeof(tmp), "%s.husk-new", real);
-    if (rename(tmp, real) != 0) tl_log_line("file: could not put the new %s in place (%s)", real, strerror(errno));
+    struct stat st;
+    if (success && stat(tmp, &st) == 0 && st.st_size > 0) {
+        if (rename(tmp, real) != 0) tl_log_line("file: could not put the new %s in place (%s)", real, strerror(errno));
+    } else {
+        unlink(tmp);
+    }
     free(real);
+}
+
+/* After fd was closed: give a new file the name of the one it replaces if valid. */
+void tl_atomic_closed(int fd)
+{
+    char *real = tl_atomic_detach(fd);
+    tl_atomic_commit(real, true);
 }
 
 static int b_open(const char *path, int flags, unsigned mode)
@@ -295,8 +312,18 @@ static int b_open(const char *path, int flags, unsigned mode)
     return fd;
 }
 static int b___open_2(const char *path, int flags) { return b_open(path, flags, 0); }
-static bool net_trace_fd(int fd);
-static int b_close(int fd) { if (vfd_is(fd)) g_vfd[fd].on = false; bool sock = net_trace_fd(fd); TL_ERRNO_BEGIN(); int r = close(fd); tl_atomic_closed(fd); TL_ERRNO_END(); if (sock) tl_log_line("net: close(fd %d)", fd); return r; }
+static int b_close(int fd)
+{
+    if (vfd_is(fd)) g_vfd[fd].on = false;
+    bool sock = net_trace_fd(fd);
+    char *real = tl_atomic_detach(fd);
+    TL_ERRNO_BEGIN();
+    int r = close(fd);
+    tl_atomic_commit(real, r == 0);
+    TL_ERRNO_END();
+    if (sock) tl_log_line("net: close(fd %d)", fd);
+    return r;
+}
 static bool net_trace_fd(int fd)
 {
     static int on = -1;
@@ -667,31 +694,37 @@ static void *phantom_reserve(size_t len)
 {
     if (len != 2 * PHANTOM_HALF || g_nphantom >= 4) return MAP_FAILED;
     void *res = MAP_FAILED;
-    /* Reserve 5 GiB, which holds an aligned 4 GiB only when it starts in the first GiB of an alignment period. Mappings come one after
-     * another, so a miss is kept (it moves the next one on by a GiB) and given back once there is a hit. */
-    void *held[8]; int nheld = 0;
-    const size_t S = PHANTOM_HALF + ((size_t)1 << 30);
-    for (int t = 0; t < 8 && res == MAP_FAILED; t++) {
-        void *p = mmap(NULL, S, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
-        if (p == MAP_FAILED) break;
-        uintptr_t b = (uintptr_t)p, start = (b + PHANTOM_HALF - 1) & ~(PHANTOM_HALF - 1), end = start + PHANTOM_HALF;
-        if (end <= b + S) {
-            if (start > b) munmap(p, start - b);
-            if (b + S > end) munmap((void *)end, b + S - end);
-            res = (void *)start;
-        } else held[nheld++] = p;
+
+    /* 1. Directly ask Mach VM for a 4 GiB range aligned to a 4 GiB boundary */
+    vm_address_t addr = 0;
+    vm_offset_t mask = (vm_offset_t)(PHANTOM_HALF - 1);
+    kern_return_t kr = vm_map(mach_task_self(), &addr, (vm_size_t)PHANTOM_HALF, mask,
+                              VM_FLAGS_ANYWHERE, MEMORY_OBJECT_NULL, 0,
+                              FALSE, VM_PROT_NONE, VM_PROT_DEFAULT, VM_INHERIT_NONE);
+    if (kr == KERN_SUCCESS && addr != 0) {
+        res = (void *)(uintptr_t)addr;
     }
-    for (int i = 0; i < nheld; i++) munmap(held[i], S);
-    if (res == MAP_FAILED) {                                  /* a 5 GiB mapping is refused too: try 4 GiB where it happens to fall aligned */
+
+    /* 2. Fallback: try mmap stepping through hints within reachable address space */
+    if (res == MAP_FAILED) {
         void *p = mmap(NULL, PHANTOM_HALF, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
-        if (p != MAP_FAILED && ((uintptr_t)p & (PHANTOM_HALF - 1))) { munmap(p, PHANTOM_HALF); p = MAP_FAILED; }
-        for (uintptr_t hint = (uintptr_t)3 << 32; p == MAP_FAILED && hint < ((uintptr_t)1 << 36); hint += PHANTOM_HALF) {
-            void *q = mmap((void *)hint, PHANTOM_HALF, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
-            if (q == (void *)hint) p = q;
-            else if (q != MAP_FAILED) munmap(q, PHANTOM_HALF);
+        if (p != MAP_FAILED && ((uintptr_t)p & (PHANTOM_HALF - 1)) == 0) {
+            res = p;
+        } else {
+            if (p != MAP_FAILED) munmap(p, PHANTOM_HALF);
+            for (uintptr_t hint = (uintptr_t)1 << 32; hint < ((uintptr_t)1 << 35); hint += PHANTOM_HALF) {
+                void *q = mmap((void *)hint, PHANTOM_HALF, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+                if (q != MAP_FAILED) {
+                    if (((uintptr_t)q & (PHANTOM_HALF - 1)) == 0) {
+                        res = q;
+                        break;
+                    }
+                    munmap(q, PHANTOM_HALF);
+                }
+            }
         }
-        res = p;
     }
+
     if (res == MAP_FAILED) return MAP_FAILED;
     g_phantom[g_nphantom].base = (uintptr_t)res; g_phantom[g_nphantom].len = len; g_phantom[g_nphantom].real = PHANTOM_HALF;
     g_nphantom++;

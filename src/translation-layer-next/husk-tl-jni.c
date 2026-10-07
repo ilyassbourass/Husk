@@ -48,7 +48,7 @@ struct tl_jclass {
 
 #define NBUCKETS 512
 static tl_jclass *g_classes[NBUCKETS];
-static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_rwlock_t g_lock = PTHREAD_RWLOCK_INITIALIZER;
 static int g_trace;
 static const tl_jhle *g_hle[16];
 static int g_nhle;
@@ -80,8 +80,12 @@ void tl_jni_unref(jobj *o)
     switch (o->kind) {
     case TL_K_STRING: free(o->str.utf8); break;
     case TL_K_PRIM_ARRAY: free(o->arr.data); break;
-    case TL_K_OBJ_ARRAY: free(o->oarr.v); break;
-    default: break;
+    case TL_K_OBJ_ARRAY:
+        for (uint32_t i = 0; i < o->oarr.len; i++) {
+            if (o->oarr.v[i]) tl_jni_unref(o->oarr.v[i]);
+        }
+        free(o->oarr.v);
+        break;
     }
     free(o->fields);
     free(o);
@@ -95,7 +99,7 @@ static tl_jclass *find_class_locked(const char *name)
 
 tl_jclass *tl_jni_declare(const char *name, const char *super)
 {
-    pthread_mutex_lock(&g_lock);
+    pthread_rwlock_wrlock(&g_lock);
     tl_jclass *c = find_class_locked(name);
     if (!c) {
         c = calloc(1, sizeof(*c));
@@ -109,21 +113,21 @@ tl_jclass *tl_jni_declare(const char *name, const char *super)
         c->mirror->refs = 1u << 30;
     }
     if (super && !c->super) {
-        pthread_mutex_unlock(&g_lock);
+        pthread_rwlock_unlock(&g_lock);
         tl_jclass *s = tl_jni_declare(super, strcmp(super, "java/lang/Object") ? "java/lang/Object" : NULL);
-        pthread_mutex_lock(&g_lock);
+        pthread_rwlock_wrlock(&g_lock);
         if (!c->super && s != c) c->super = s;
     }
-    pthread_mutex_unlock(&g_lock);
+    pthread_rwlock_unlock(&g_lock);
     return c;
 }
 
 tl_jclass *tl_jni_class(const char *name)
 {
     tl_jclass *c;
-    pthread_mutex_lock(&g_lock);
+    pthread_rwlock_rdlock(&g_lock);
     c = find_class_locked(name);
-    pthread_mutex_unlock(&g_lock);
+    pthread_rwlock_unlock(&g_lock);
     if (c) return c;
     /* Not declared: the APK may define it, and its superclass is whatever the DEX says. */
     char sup[160];
@@ -239,12 +243,12 @@ static tl_jhle_fn hle_find_loose(const char *cls, const char *name, const char *
 /* Find or make the method `name`/`sig`, walking superclasses for an implementation. */
 static tl_jmeth *lookup_method(tl_jclass *cls, const char *name, const char *sig, bool is_static)
 {
-    pthread_mutex_lock(&g_lock);
+    pthread_rwlock_rdlock(&g_lock);
     for (int i = 0; i < cls->nmeths; i++) {
         tl_jmeth *m = cls->meths[i];
-        if (m->is_static == is_static && !strcmp(m->name, name) && !strcmp(m->sig, sig)) { pthread_mutex_unlock(&g_lock); return m; }
+        if (m->is_static == is_static && !strcmp(m->name, name) && !strcmp(m->sig, sig)) { pthread_rwlock_unlock(&g_lock); return m; }
     }
-    pthread_mutex_unlock(&g_lock);
+    pthread_rwlock_unlock(&g_lock);
 
     /* Where could this method come from? An implementation here, the APK's DEX, or a
      * framework class somewhere up the chain (which cannot be checked, so is believed). */
@@ -267,10 +271,10 @@ static tl_jmeth *lookup_method(tl_jclass *cls, const char *name, const char *sig
     m->cls = cls; m->name = strdup(name); m->sig = strdup(sig); m->is_static = is_static;
     m->fn = fn; m->exists = exists;
     parse_sig(m);
-    pthread_mutex_lock(&g_lock);
+    pthread_rwlock_wrlock(&g_lock);
     if (cls->nmeths == cls->capm) { cls->capm = cls->capm ? cls->capm * 2 : 8; cls->meths = realloc(cls->meths, (size_t)cls->capm * sizeof(*cls->meths)); }
     cls->meths[cls->nmeths++] = m;
-    pthread_mutex_unlock(&g_lock);
+    pthread_rwlock_unlock(&g_lock);
     return m;
 }
 
@@ -283,12 +287,12 @@ static bool dex_field_real_sig(tl_jclass *cls, const char *name, char *out, size
 
 static tl_jfield *lookup_field(tl_jclass *cls, const char *name, const char *sig, bool is_static, bool create)
 {
-    pthread_mutex_lock(&g_lock);
+    pthread_rwlock_rdlock(&g_lock);
     for (int i = 0; i < cls->nfields; i++) {
         tl_jfield *f = cls->fields[i];
-        if (f->is_static == is_static && !strcmp(f->name, name) && !strcmp(f->sig, sig)) { pthread_mutex_unlock(&g_lock); return f; }
+        if (f->is_static == is_static && !strcmp(f->name, name) && !strcmp(f->sig, sig)) { pthread_rwlock_unlock(&g_lock); return f; }
     }
-    pthread_mutex_unlock(&g_lock);
+    pthread_rwlock_unlock(&g_lock);
     if (!create) {
         /* Existence: an app class's fields can be checked; a framework class's are believed. */
         bool found = false;
@@ -300,7 +304,7 @@ static tl_jfield *lookup_field(tl_jclass *cls, const char *name, const char *sig
     }
     tl_jfield *f = calloc(1, sizeof(*f));
     f->cls = cls; f->name = strdup(name); f->sig = strdup(sig); f->is_static = is_static;
-    pthread_mutex_lock(&g_lock);
+    pthread_rwlock_wrlock(&g_lock);
     f->index = (uint32_t)(is_static ? cls->nstatics++ : cls->nfields - 0);
     if (is_static) {
         cls->statics = realloc(cls->statics, (size_t)cls->nstatics * sizeof(jvalue));
@@ -312,7 +316,7 @@ static tl_jfield *lookup_field(tl_jclass *cls, const char *name, const char *sig
     }
     if (cls->nfields == cls->capf) { cls->capf = cls->capf ? cls->capf * 2 : 8; cls->fields = realloc(cls->fields, (size_t)cls->capf * sizeof(*cls->fields)); }
     cls->fields[cls->nfields++] = f;
-    pthread_mutex_unlock(&g_lock);
+    pthread_rwlock_unlock(&g_lock);
     return f;
 }
 
@@ -465,7 +469,7 @@ static jo jni_FindClass(void *env, const char *name)
                   || !strncmp(name, "dalvik/", 7) || !strncmp(name, "libcore/", 8) || !strncmp(name, "sun/", 4)
                   || !strncmp(name, "org/json/", 9) || !strncmp(name, "org/xml/", 8) || !strncmp(name, "org/w3c/", 8);
     tl_jclass *known;
-    pthread_mutex_lock(&g_lock); known = find_class_locked(name); pthread_mutex_unlock(&g_lock);
+    pthread_rwlock_rdlock(&g_lock); known = find_class_locked(name); pthread_rwlock_unlock(&g_lock);
     if (array || framework || known || tl_dexidx_has_class(name)) {
         TRACE("jni: FindClass(%s)", name);
         return tl_jni_class(name)->mirror;
@@ -852,7 +856,7 @@ static int32_t jni_RegisterNatives(void *env, jo cls, const native_method *m, in
     (void)env;
     if (!cls || cls->kind != TL_K_CLASS) return -1;
     tl_jclass *c = cls->klass.jc;
-    pthread_mutex_lock(&g_lock);
+    pthread_rwlock_wrlock(&g_lock);
     for (int32_t i = 0; i < n; i++) {
         c->natives = realloc(c->natives, (size_t)(c->nnatives + 1) * sizeof(*c->natives));
         c->natives[c->nnatives].name = strdup(m[i].name);
@@ -861,7 +865,7 @@ static int32_t jni_RegisterNatives(void *env, jo cls, const native_method *m, in
         c->nnatives++;
         TRACE("jni: RegisterNatives %s.%s%s -> %p", c->name, m[i].name, m[i].sig, m[i].fn);
     }
-    pthread_mutex_unlock(&g_lock);
+    pthread_rwlock_unlock(&g_lock);
     return 0;
 }
 static int32_t jni_UnregisterNatives(void *env, jo cls) { (void)env; (void)cls; return 0; }
@@ -870,9 +874,9 @@ void *tl_jni_native(const char *cls, const char *name, const char *sig)
 {
     tl_jclass *c = tl_jni_class(cls);
     void *r = NULL;
-    pthread_mutex_lock(&g_lock);
+    pthread_rwlock_rdlock(&g_lock);
     for (int i = 0; i < c->nnatives; i++) if (!strcmp(c->natives[i].name, name) && (!sig || !strcmp(c->natives[i].sig, sig))) r = c->natives[i].fn;
-    pthread_mutex_unlock(&g_lock);
+    pthread_rwlock_unlock(&g_lock);
     return r;
 }
 

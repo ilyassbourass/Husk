@@ -28,8 +28,12 @@ final class HuskMetalView: MTKView {
         self.framebufferOnly = false
         self.isPaused = false
         self.enableSetNeedsDisplay = false
-        self.preferredFramesPerSecond = 60
-        self.isMultipleTouchEnabled = false
+        if #available(iOS 15.0, *) {
+            self.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
+        } else {
+            self.preferredFramesPerSecond = 60
+        }
+        self.isMultipleTouchEnabled = true
         self.delegate = self
         self.clearColor = MTLClearColorMake(0, 0, 0, 1)
         buildPipeline()
@@ -75,22 +79,36 @@ final class HuskMetalView: MTKView {
         return (Int32(gx), Int32(gy))
     }
 
+    private var activeTouches: [UITouch: Int32] = [:]
+    private var nextPointerId: Int32 = 0
+
     private func send(_ touch: UITouch, down: Bool) {
         guard let (x, y) = guestPoint(from: touch.location(in: self)) else { return }
         husk_display_send_pointer(x, y, down)
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if let t = touches.first { send(t, down: true) }
+        for t in touches {
+            let pid = nextPointerId
+            nextPointerId = (nextPointerId + 1) % 10
+            activeTouches[t] = pid
+            send(t, down: true)
+        }
     }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if let t = touches.first { send(t, down: true) }
+        for t in touches {
+            if activeTouches[t] != nil { send(t, down: true) }
+        }
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if let t = touches.first { send(t, down: false) }
+        for t in touches {
+            if activeTouches.removeValue(forKey: t) != nil { send(t, down: false) }
+        }
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if let t = touches.first { send(t, down: false) }
+        for t in touches {
+            if activeTouches.removeValue(forKey: t) != nil { send(t, down: false) }
+        }
     }
 }
 
@@ -98,20 +116,23 @@ extension HuskMetalView: MTKViewDelegate {
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
-        guard let device,
-              let commandQueue,
-              let drawable = currentDrawable,
-              let pass = currentRenderPassDescriptor else { return }
+        guard let device, let commandQueue else { return }
 
         let seq = husk_display_sequence()
 
-        // No need to poke QEMU for a redraw here: register_displaychangelistener()
-        // calls gui_setup_refresh(), which drives dpy_refresh on QEMU's own timer
-        // for any listener that provides one. Calling husk_display_request_update()
-        // per frame would take the BQL 60 times a second from the UI thread and
-        // contend with the emulator for nothing.
         var info = HuskFrameInfo()
         guard husk_display_lock_frame(&info) else { return }
+
+        if seq == lastSequence && textureGeneration == info.generation && texture != nil {
+            husk_display_unlock_frame()
+            return
+        }
+
+        guard let drawable = currentDrawable,
+              let pass = currentRenderPassDescriptor else {
+            husk_display_unlock_frame()
+            return
+        }
 
         if info.generation != textureGeneration || texture == nil {
             let desc = MTLTextureDescriptor.texture2DDescriptor(

@@ -303,11 +303,22 @@ int tl_format_wide(wchar_t *out, size_t cap, const wchar_t *fmt, tl_va_list *ap)
 
 int tl_scan_string(const char *src, const char *fmt, tl_va_list *ap)
 {
-    /* Every output is a pointer, so the arguments are read blind -- more than any call needs -- and the host's sscanf takes only as many as the format asks for. A game that
-     * parses a wide table with one call needs the room: GTA's timecyc.dat has fifty-two fields to a line. */
+    /* Parse format specifiers in fmt (skipping %% and %*) so we only read as many arguments
+     * from ap as the caller actually pushed, avoiding reading past the caller's stack frame. */
+    int expected = 0;
+    for (const char *p = fmt; *p && expected < 96; p++) {
+        if (*p == '%') {
+            p++;
+            if (*p == '%') continue;
+            if (*p == '*') continue;
+            expected++;
+        }
+    }
+    if (expected <= 0) expected = 1;
+
     enum { N = 96 };
-    void *a[N];
-    for (int i = 0; i < N; i++) a[i] = (void *)(uintptr_t)tl_va_arg_u64(ap);
+    void *a[N] = { NULL };
+    for (int i = 0; i < expected; i++) a[i] = (void *)(uintptr_t)tl_va_arg_u64(ap);
     { static int tr = -1; if (tr < 0) tr = getenv("TL_SCAN_TRACE") ? 1 : 0; if (tr) tl_log_line("scan: sscanf(\"%.80s\", \"%s\")", src, fmt); }
     return sscanf(src, fmt, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15],
                   a[16], a[17], a[18], a[19], a[20], a[21], a[22], a[23], a[24], a[25], a[26], a[27], a[28], a[29], a[30], a[31],
