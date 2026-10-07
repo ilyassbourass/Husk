@@ -36,6 +36,7 @@
 /*
  * Provide pipe2 for iOS systems where libc does not export it.
  */
+int pipe2(int fds[2], int flags);
 __attribute__((visibility("default")))
 int pipe2(int fds[2], int flags)
 {
@@ -367,7 +368,7 @@ static HuskDualMapping husk_ios_jit_allocate_real(size_t bytes)
                 region.rx_addr = direct_rx;
                 region.rw_addr = (void *)alias;
                 region.size = bytes;
-                if (husk_ios_jit_selftest(&region)) {
+                if (husk_jit_selftest(&region)) {
                     HUSK_LOG("#%llu: granted %zu bytes via direct vm_remap (TrollStore/jailbreak mode)",
                              (unsigned long long)n, bytes);
                     atomic_store(&g_jit_available, true);
