@@ -46,6 +46,9 @@ step "guest kernel + firmware"
 step "on-device pairing (Rust)"
 ./scripts/build_rppairing_ios.sh
 
+step "MoltenVK (Vulkan over Metal)"
+./scripts/build_moltenvk_ios.sh
+
 step "app + IPA"
 mkdir -p "$(dirname "$OUT")"
 ./scripts/package_ipa.sh "$OUT"

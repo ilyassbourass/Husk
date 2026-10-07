@@ -11,6 +11,27 @@ VERSION="${MOLTENVK_VERSION:-v1.4.2}"
 SRC="$HUSK_ROOT/third_party/build/MoltenVK-${VERSION#v}"
 OUT="$HUSK_ROOT/build/ios-arm64/lib"
 
+mkdir -p "$OUT"
+if [ -d "$OUT/MoltenVK.xcframework" ]; then
+    echo "==> MoltenVK.xcframework already present at $OUT/MoltenVK.xcframework"
+    exit 0
+fi
+
+MVK_TAR="/tmp/MoltenVK-ios.tar"
+MVK_TMP="/tmp/mvk_extract"
+echo "==> fetching official prebuilt MoltenVK $VERSION for iOS"
+if curl -fL --retry 3 -o "$MVK_TAR" "https://github.com/KhronosGroup/MoltenVK/releases/download/$VERSION/MoltenVK-ios.tar" 2>/dev/null; then
+    rm -rf "$MVK_TMP"
+    mkdir -p "$MVK_TMP"
+    tar -xf "$MVK_TAR" -C "$MVK_TMP"
+    rm -rf "$OUT/MoltenVK.xcframework"
+    cp -R "$MVK_TMP/MoltenVK/MoltenVK/dynamic/MoltenVK.xcframework" "$OUT/"
+    rm -rf "$MVK_TAR" "$MVK_TMP"
+    echo "==> staged $OUT/MoltenVK.xcframework"
+    exit 0
+fi
+
+echo "==> prebuilt download unavailable; building MoltenVK from source"
 if [ ! -d "$SRC" ]; then
     echo "==> cloning MoltenVK $VERSION"
     git clone --depth 1 --branch "$VERSION" https://github.com/KhronosGroup/MoltenVK "$SRC"
@@ -19,7 +40,6 @@ cd "$SRC"
 [ -d External/build/Release/SPIRVCross.xcframework ] || { echo "==> fetching dependencies"; ./fetchDependencies --ios; }
 echo "==> building"
 make ios
-mkdir -p "$OUT"
 rm -rf "$OUT/MoltenVK.xcframework"
 cp -R Package/Release/MoltenVK/dynamic/MoltenVK.xcframework "$OUT/"
 echo "==> $OUT/MoltenVK.xcframework"
