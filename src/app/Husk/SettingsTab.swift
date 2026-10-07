@@ -246,14 +246,11 @@ struct InputSettings: View {
             } header: {
                 Text("Screen")
             } footer: {
-                Text(customRes
-                     ? "A custom resolution sets the shape itself, so this does nothing "
-                     + "while it is on. Type a wide size for landscape."
-                     : "Android cannot reshape a screen once it is running, so a "
-                     + "landscape game on a portrait screen gets letterboxed into a "
-                     + "band and looks tiny. Creating it landscape is the only way it "
-                     + "can fill it — portrait apps are letterboxed instead. Costs one "
-                     + "cold boot.")
+                if customRes {
+                    Text("A custom resolution sets the shape itself, so this does nothing while it is on. Type a wide size for landscape.")
+                } else {
+                    Text("Android cannot reshape a screen once it is running, so a landscape game on a portrait screen gets letterboxed into a band and looks tiny. Creating it landscape is the only way it can fill it — portrait apps are letterboxed instead. Costs one cold boot.")
+                }
             }
 
             Section {
@@ -407,6 +404,16 @@ struct JITSettings: View {
         }
     }
 
+    private var jailbreakStatus: String {
+        if JITBootstrap.debuggedAtLaunch {
+            return "JIT allowed for apps"
+        } else if JITBootstrap.isJailbroken {
+            return "found; Allow JIT in Apps is off"
+        } else {
+            return "not found"
+        }
+    }
+
     var body: some View {
         Form {
             Section {
@@ -425,9 +432,7 @@ struct JITSettings: View {
                           value: JITBootstrap.isTrollStoreInstalled ? "installed" : "not found", mono: false)
                 DetailRow(label: "Installed with TrollStore",
                           value: JITBootstrap.isInstalledWithTrollStore ? "yes" : "no", mono: false)
-                DetailRow(label: "Jailbreak",
-                          value: JITBootstrap.debuggedAtLaunch ? "JIT allowed for apps"
-                               : JITBootstrap.isJailbroken ? "found; Allow JIT in Apps is off" : "not found", mono: false)
+                DetailRow(label: "Jailbreak", value: jailbreakStatus, mono: false)
                 DetailRow(label: "Built-in pairing", value: pairingLabel, mono: false)
                 Button {
                     jit.showSetup = true
@@ -437,11 +442,13 @@ struct JITSettings: View {
             } header: {
                 Text("Other Ways to Turn On JIT")
             } footer: {
-                Text(jit.method == .automatic
-                     ? jit.automaticDescription + " Built-in StikJIT needs iOS 26, LocalDevVPN, and a "
-                       + "pairing file, which Husk can make itself on iOS 27."
-                     : HuskBuiltInJIT.unavailableReason ?? "Built-in StikJIT needs LocalDevVPN and a pairing "
-                       + "file, which Husk can make itself on iOS 27.")
+                if jit.method == .automatic {
+                    Text("\(jit.automaticDescription) Built-in StikJIT needs iOS 26, LocalDevVPN, and a pairing file, which Husk can make itself on iOS 27.")
+                } else if let reason = HuskBuiltInJIT.unavailableReason {
+                    Text(reason)
+                } else {
+                    Text("Built-in StikJIT needs LocalDevVPN and a pairing file, which Husk can make itself on iOS 27.")
+                }
             }
 
             Section {

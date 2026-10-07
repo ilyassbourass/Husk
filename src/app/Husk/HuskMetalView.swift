@@ -28,11 +28,7 @@ final class HuskMetalView: MTKView {
         self.framebufferOnly = false
         self.isPaused = false
         self.enableSetNeedsDisplay = false
-        if #available(iOS 15.0, *) {
-            self.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
-        } else {
-            self.preferredFramesPerSecond = 60
-        }
+        self.preferredFramesPerSecond = 120
         self.isMultipleTouchEnabled = true
         self.delegate = self
         self.clearColor = MTLClearColorMake(0, 0, 0, 1)
