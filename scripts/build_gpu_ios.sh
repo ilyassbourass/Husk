@@ -67,6 +67,7 @@ echo "==> virglrenderer (render server in thread mode)"
 # constraint that makes QEMU an in-process library here. UTM uses process mode
 # on macOS and thread mode everywhere else for exactly this reason.
 ( cd "$GPU/virgl"
+  sed -i.bak 's/angle_done:/angle_done: ;/g' src/vrend/vrend_renderer.c 2>/dev/null || true
   rm -rf _build
   $MESON setup _build --cross-file "$HUSK_ROOT/build/ios-arm64/cross-ios-darwin.meson" \
       --prefix "$PREFIX" --default-library=static \
