@@ -312,6 +312,7 @@ static int b_open(const char *path, int flags, unsigned mode)
     return fd;
 }
 static int b___open_2(const char *path, int flags) { return b_open(path, flags, 0); }
+static bool net_trace_fd(int fd);
 static int b_close(int fd)
 {
     if (vfd_is(fd)) g_vfd[fd].on = false;
