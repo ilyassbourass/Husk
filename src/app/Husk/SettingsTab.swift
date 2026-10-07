@@ -231,99 +231,116 @@ struct InputSettings: View {
 
     var body: some View {
         Form {
-            Section {
-                Picker("Screen", selection: $landscapeGuest) {
-                    Text("Portrait").tag(false)
-                    Text("Landscape").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .disabled(customRes)
-                .onChange(of: landscapeGuest) { v in
-                    UserDefaults.standard.set(v, forKey: "husk.landscapeGuest")
-                    HuskLog.log("ui", v ? "guest panel will be landscape"
-                                        : "guest panel will be portrait")
-                }
-            } header: {
-                Text("Screen")
-            } footer: {
-                if customRes {
-                    Text("A custom resolution sets the shape itself, so this does nothing while it is on. Type a wide size for landscape.")
-                } else {
-                    Text("Android cannot reshape a screen once it is running, so a landscape game on a portrait screen gets letterboxed into a band and looks tiny. Creating it landscape is the only way it can fill it — portrait apps are letterboxed instead. Costs one cold boot.")
-                }
-            }
-
-            Section {
-                Toggle("Custom resolution", isOn: $customRes)
-                    .onChange(of: customRes) { v in
-                        UserDefaults.standard.set(v, forKey: "husk.customRes")
-                        store()
-                        HuskLog.log("ui", v ? "custom resolution on: "
-                                            + "\(widthText)x\(heightText)"
-                                            : "custom resolution off")
-                    }
-
-                if customRes {
-                    Picker("Preset", selection: Binding(
-                        get: { presetIndex },
-                        set: { i in
-                            guard i >= 0, i < Self.presets.count else { return }
-                            widthText = String(Self.presets[i].w)
-                            heightText = String(Self.presets[i].h)
-                            store()
-                        })) {
-                        ForEach(0..<Self.presets.count, id: \.self) { i in
-                            Text(Self.presets[i].name).tag(i)
-                        }
-                        Text("Custom").tag(-1)
-                    }
-
-                    HStack {
-                        Text("Width")
-                        Spacer()
-                        TextField("720", text: $widthText)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                            .font(.technical())
-                            .frame(width: 90)
-                            .onChange(of: widthText) { _ in store() }
-                    }
-                    HStack {
-                        Text("Height")
-                        Spacer()
-                        TextField("1280", text: $heightText)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                            .font(.technical())
-                            .frame(width: 90)
-                            .onChange(of: heightText) { _ in store() }
-                    }
-
-                    if let size = effective {
-                        DetailRow(label: "Android will get",
-                                  value: "\(size.w) × \(size.h)")
-                    } else {
-                        Text("Both sides must be between 240 and 2560.")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
-                }
-
-                DetailRow(label: "Running now", value: running)
-            } header: {
-                Text("Resolution")
-            } footer: {
-                Text("The panel is built when the machine starts, so a change costs one cold boot, and the next save replaces the machine saved at the old size — changing back costs another. Sizes are rounded to a multiple of eight. Bigger is slower: every pixel is drawn by an emulated phone. Android's density does not change with the panel, so a larger one shows more rather than bigger.")
-            }
-
-            Section {
-                Text("Touch is always on. The keyboard and the rotate control are in the pill at the bottom of the guest's screen; a gamepad and a pointer are not wired through yet.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: {
-                Text("Controls")
-            }
+            screenSection
+            resolutionSection
+            controlsSection
         }
         .huskForm()
         .navigationTitle("Input")
+    }
+
+    @ViewBuilder
+    private var screenSection: some View {
+        Section {
+            Picker("Screen", selection: $landscapeGuest) {
+                Text("Portrait").tag(false)
+                Text("Landscape").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .disabled(customRes)
+            .onChange(of: landscapeGuest) { v in
+                UserDefaults.standard.set(v, forKey: "husk.landscapeGuest")
+                HuskLog.log("ui", v ? "guest panel will be landscape"
+                                    : "guest panel will be portrait")
+            }
+        } header: {
+            Text("Screen")
+        } footer: {
+            if customRes {
+                Text("A custom resolution sets the shape itself, so this does nothing while it is on. Type a wide size for landscape.")
+            } else {
+                Text("Android cannot reshape a screen once it is running, so a landscape game on a portrait screen gets letterboxed into a band and looks tiny. Creating it landscape is the only way it can fill it — portrait apps are letterboxed instead. Costs one cold boot.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var resolutionSection: some View {
+        Section {
+            Toggle("Custom resolution", isOn: $customRes)
+                .onChange(of: customRes) { v in
+                    UserDefaults.standard.set(v, forKey: "husk.customRes")
+                    store()
+                    HuskLog.log("ui", v ? "custom resolution on: \(widthText)x\(heightText)"
+                                        : "custom resolution off")
+                }
+
+            if customRes {
+                Picker("Preset", selection: presetBinding) {
+                    ForEach(0..<Self.presets.count, id: \.self) { i in
+                        Text(Self.presets[i].name).tag(i)
+                    }
+                    Text("Custom").tag(-1)
+                }
+
+                HStack {
+                    Text("Width")
+                    Spacer()
+                    TextField("720", text: $widthText)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .font(.technical())
+                        .frame(width: 90)
+                        .onChange(of: widthText) { _ in store() }
+                }
+                HStack {
+                    Text("Height")
+                    Spacer()
+                    TextField("1280", text: $heightText)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .font(.technical())
+                        .frame(width: 90)
+                        .onChange(of: heightText) { _ in store() }
+                }
+
+                if let size = effective {
+                    DetailRow(label: "Android will get",
+                              value: "\(size.w) × \(size.h)")
+                } else {
+                    Text("Both sides must be between 240 and 2560.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+            }
+
+            DetailRow(label: "Running now", value: running)
+        } header: {
+            Text("Resolution")
+        } footer: {
+            Text("The panel is built when the machine starts, so a change costs one cold boot, and the next save replaces the machine saved at the old size — changing back costs another. Sizes are rounded to a multiple of eight. Bigger is slower: every pixel is drawn by an emulated phone. Android's density does not change with the panel, so a larger one shows more rather than bigger.")
+        }
+    }
+
+    @ViewBuilder
+    private var controlsSection: some View {
+        Section {
+            Text("Touch is always on. The keyboard and the rotate control are in the pill at the bottom of the guest's screen; a gamepad and a pointer are not wired through yet.")
+                .font(.footnote).foregroundStyle(.secondary)
+        } header: {
+            Text("Controls")
+        }
+    }
+
+    private var presetBinding: Binding<Int> {
+        Binding(
+            get: { presetIndex },
+            set: { i in
+                guard i >= 0, i < Self.presets.count else { return }
+                widthText = String(Self.presets[i].w)
+                heightText = String(Self.presets[i].h)
+                store()
+            }
+        )
     }
 
     /// The panel the guest actually has, which only means anything while there
@@ -409,113 +426,130 @@ struct JITSettings: View {
 
     var body: some View {
         Form {
-            Section {
-                JITCard()
-            }
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-
-            Section {
-                Picker("Method", selection: $jit.method) {
-                    ForEach(JITMethod.allCases) { Text($0.title).tag($0) }
-                }
-                DetailRow(label: "StikDebug",
-                          value: JITBootstrap.isStikDebugInstalled ? "installed" : "not found", mono: false)
-                DetailRow(label: "TrollStore",
-                          value: JITBootstrap.isTrollStoreInstalled ? "installed" : "not found", mono: false)
-                DetailRow(label: "Installed with TrollStore",
-                          value: JITBootstrap.isInstalledWithTrollStore ? "yes" : "no", mono: false)
-                DetailRow(label: "Jailbreak", value: jailbreakStatus, mono: false)
-                DetailRow(label: "Built-in pairing", value: pairingLabel, mono: false)
-                Button {
-                    jit.showSetup = true
-                } label: {
-                    Label("Set up JIT", systemImage: "wand.and.stars")
-                }
-            } header: {
-                Text("Other Ways to Turn On JIT")
-            } footer: {
-                if jit.method == .automatic {
-                    Text("\(jit.automaticDescription) Built-in StikJIT needs iOS 26, LocalDevVPN, and a pairing file, which Husk can make itself on iOS 27.")
-                } else if let reason = HuskBuiltInJIT.unavailableReason {
-                    Text(reason)
-                } else {
-                    Text("Built-in StikJIT needs LocalDevVPN and a pairing file, which Husk can make itself on iOS 27.")
-                }
-            }
-
-            Section {
-                DetailRow(label: "Debugger",
-                          value: JITBootstrap.isDebuggerAttached ? "attached" : "not attached",
-                          mono: false)
-                DetailRow(label: "Executable memory",
-                          value: JITBootstrap.isLive ? "granted" : "not claimed", mono: false)
-                // The two routes, named separately. Either one is enough, and
-                // when someone reports "JIT does not work" these two rows are
-                // the whole diagnosis.
-                DetailRow(label: "Trap servicer",
-                          value: JITBootstrap.prewarmed ? "answering" : "not answering",
-                          mono: false)
-                // Cached answer only: running the probe from a view body
-                // could freeze the app (see JITBootstrap.mapJITWorks).
-                DetailRow(label: "MAP_JIT",
-                          value: JITBootstrap.deviceEnforcesTXM ? "not used (TXM)"
-                               : JITBootstrap.mapJITResult.map { $0 ? "executes" : "refused" }
-                                 ?? "not tested",
-                          mono: false)
-                DetailRow(label: "Debugger after setup",
-                          value: JITBootstrap.detached ? "detached" : "attached",
-                          mono: false)
-                if let why = JITBootstrap.lastFailure {
-                    Text(why).font(.caption).foregroundStyle(.orange)
-                }
-                if !JITBootstrap.isDebuggerAttached {
-                    Button {
-                        jit.enable()
-                    } label: {
-                        Label("Enable JIT with \(jit.resolvedMethod.title)", systemImage: "bolt.fill")
-                    }
-                    .disabled(jit.busy)
-                    Button {
-                        _ = JITBootstrap.requestTrollStoreAttach()
-                    } label: {
-                        Label("Enable JIT with TrollStore", systemImage: "sparkles")
-                    }
-                }
-            } header: {
-                Text("JIT")
-            } footer: {
-                Text("Husk needs memory it can write and then execute, which on iOS takes an attached debugger. There are two ways to get it: a debugger that services trap requests, or a MAP_JIT mapping, which the kernel allows any debugged process. Either one is enough — which is available depends on the device and the iOS version, so Husk tests both rather than assuming.")
-            }
-
-            Section {
-                Toggle("Start Android on launch", isOn: $autoStart)
-                    .onChange(of: autoStart) { v in
-                        UserDefaults.standard.set(v, forKey: "husk.autoStart")
-                    }
-            } footer: {
-                Text("Boots the guest as soon as Husk opens, when JIT is available.")
-            }
-
-            Section {
-                Toggle("Keep debugger attached", isOn: $keepAttached)
-                    .onChange(of: keepAttached) { v in JITBootstrap.keepDebuggerAttached = v }
-            } footer: {
-                Text("Off by default. Husk detaches StikDebug as soon as the JIT region is held, because a debugger that iOS has suspended stops the whole app the next time it is needed. Turn this on only to collect StikDebug's own logs.")
-            }
-
-            Section {
-                Text("APKs install from the Library's + button or from the Files tab. "
-                   + "Split sets — a base APK plus its config pieces — must be picked "
-                   + "together; installing the base alone fails on missing native "
-                   + "libraries.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: {
-                Text("Sideloading")
-            }
+            cardSection
+            methodsSection
+            diagnosticsSection
+            autoStartSection
+            debuggerSection
+            sideloadingSection
         }
         .huskForm()
         .navigationTitle("JIT & sideload")
+    }
+
+    @ViewBuilder
+    private var cardSection: some View {
+        Section {
+            JITCard()
+        }
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+    }
+
+    @ViewBuilder
+    private var methodsSection: some View {
+        Section {
+            Picker("Method", selection: $jit.method) {
+                ForEach(JITMethod.allCases) { Text($0.title).tag($0) }
+            }
+            DetailRow(label: "StikDebug",
+                      value: JITBootstrap.isStikDebugInstalled ? "installed" : "not found", mono: false)
+            DetailRow(label: "TrollStore",
+                      value: JITBootstrap.isTrollStoreInstalled ? "installed" : "not found", mono: false)
+            DetailRow(label: "Installed with TrollStore",
+                      value: JITBootstrap.isInstalledWithTrollStore ? "yes" : "no", mono: false)
+            DetailRow(label: "Jailbreak", value: jailbreakStatus, mono: false)
+            DetailRow(label: "Built-in pairing", value: pairingLabel, mono: false)
+            Button {
+                jit.showSetup = true
+            } label: {
+                Label("Set up JIT", systemImage: "wand.and.stars")
+            }
+        } header: {
+            Text("Other Ways to Turn On JIT")
+        } footer: {
+            if jit.method == .automatic {
+                Text("\(jit.automaticDescription) Built-in StikJIT needs iOS 26, LocalDevVPN, and a pairing file, which Husk can make itself on iOS 27.")
+            } else if let reason = HuskBuiltInJIT.unavailableReason {
+                Text(reason)
+            } else {
+                Text("Built-in StikJIT needs LocalDevVPN and a pairing file, which Husk can make itself on iOS 27.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var diagnosticsSection: some View {
+        Section {
+            DetailRow(label: "Debugger",
+                      value: JITBootstrap.isDebuggerAttached ? "attached" : "not attached",
+                      mono: false)
+            DetailRow(label: "Executable memory",
+                      value: JITBootstrap.isLive ? "granted" : "not claimed", mono: false)
+            DetailRow(label: "Trap servicer",
+                      value: JITBootstrap.prewarmed ? "answering" : "not answering",
+                      mono: false)
+            DetailRow(label: "MAP_JIT",
+                      value: JITBootstrap.deviceEnforcesTXM ? "not used (TXM)"
+                           : JITBootstrap.mapJITResult.map { $0 ? "executes" : "refused" }
+                             ?? "not tested",
+                      mono: false)
+            DetailRow(label: "Debugger after setup",
+                      value: JITBootstrap.detached ? "detached" : "attached",
+                      mono: false)
+            if let why = JITBootstrap.lastFailure {
+                Text(why).font(.caption).foregroundStyle(.orange)
+            }
+            if !JITBootstrap.isDebuggerAttached {
+                Button {
+                    jit.enable()
+                } label: {
+                    Label("Enable JIT with \(jit.resolvedMethod.title)", systemImage: "bolt.fill")
+                }
+                .disabled(jit.busy)
+                Button {
+                    _ = JITBootstrap.requestTrollStoreAttach()
+                } label: {
+                    Label("Enable JIT with TrollStore", systemImage: "sparkles")
+                }
+            }
+        } header: {
+            Text("JIT")
+        } footer: {
+            Text("Husk needs memory it can write and then execute, which on iOS takes an attached debugger. There are two ways to get it: a debugger that services trap requests, or a MAP_JIT mapping, which the kernel allows any debugged process. Either one is enough — which is available depends on the device and the iOS version, so Husk tests both rather than assuming.")
+        }
+    }
+
+    @ViewBuilder
+    private var autoStartSection: some View {
+        Section {
+            Toggle("Start Android on launch", isOn: $autoStart)
+                .onChange(of: autoStart) { v in
+                    UserDefaults.standard.set(v, forKey: "husk.autoStart")
+                }
+        } footer: {
+            Text("Boots the guest as soon as Husk opens, when JIT is available.")
+        }
+    }
+
+    @ViewBuilder
+    private var debuggerSection: some View {
+        Section {
+            Toggle("Keep debugger attached", isOn: $keepAttached)
+                .onChange(of: keepAttached) { v in JITBootstrap.keepDebuggerAttached = v }
+        } footer: {
+            Text("Off by default. Husk detaches StikDebug as soon as the JIT region is held, because a debugger that iOS has suspended stops the whole app the next time it is needed. Turn this on only to collect StikDebug's own logs.")
+        }
+    }
+
+    @ViewBuilder
+    private var sideloadingSection: some View {
+        Section {
+            Text("APKs install from the Library's + button or from the Files tab. Split sets — a base APK plus its config pieces — must be picked together; installing the base alone fails on missing native libraries.")
+                .font(.footnote).foregroundStyle(.secondary)
+        } header: {
+            Text("Sideloading")
+        }
     }
 }
 
