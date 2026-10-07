@@ -50,7 +50,7 @@ echo "==> libepoxy"
   rm -rf _build
   $MESON setup _build --cross-file "$HUSK_ROOT/build/ios-arm64/cross-ios.meson" \
       --prefix "$PREFIX" --default-library=static \
-      -Dtests=false -Dglx=no -Degl=yes -Dx11=false
+      -Dtests=false -Dglx=no -Degl=yes -Dx11=false -Dwerror=false
   $NINJA -C _build install ) > "$LOGS/epoxy.log" 2>&1 \
   || { echo "epoxy failed:" >&2; grep -a "error:\|FAILED:" "$LOGS/epoxy.log" | head -10 >&2; exit 1; }
 echo "    $(ls -lh "$PREFIX/lib/libepoxy.a" | awk '{print $5}')"
@@ -71,7 +71,7 @@ echo "==> virglrenderer (render server in thread mode)"
   $MESON setup _build --cross-file "$HUSK_ROOT/build/ios-arm64/cross-ios-darwin.meson" \
       --prefix "$PREFIX" --default-library=static \
       -Dtests=false -Dcheck-gl-errors=false -Dvenus=false -Dvulkan-dload=false \
-      -Drender-server-mode=thread
+      -Drender-server-mode=thread -Dwerror=false
   $NINJA -C _build install ) > "$LOGS/virgl.log" 2>&1 \
   || { echo "virglrenderer failed:" >&2; grep -a "error:\|FAILED:\|ERROR" "$LOGS/virgl.log" | head -10 >&2; exit 1; }
 echo "    $(ls -lh "$PREFIX/lib/libvirglrenderer.a" | awk '{print $5}')"

@@ -33,6 +33,13 @@ fi
 
 cd "$WK/Source/ThirdParty/ANGLE"
 
+# Defuse Clang 16+ thread safety attribute error on std::mutex in SimpleMutex.h
+if [ -f src/common/SimpleMutex.h ]; then
+    sed -i.bak -e 's/ANGLE_ACQUIRE_CAPABILITY(mutex)//g' \
+               -e 's/ANGLE_RELEASE_CAPABILITY(mutex)//g' \
+               src/common/SimpleMutex.h 2>/dev/null || true
+fi
+
 # Two overrides worth explaining.
 #
 # WK_AVAILABILITY_OVERLAY_FLAGS points at a clang VFS overlay that WebKit
@@ -66,6 +73,10 @@ angle_build () {
         -sdk iphoneos -arch arm64 -configuration Release \
         WEBCORE_LIBRARY_DIR="/usr/local/lib" NORMAL_UMBRELLA_FRAMEWORKS_DIR="" \
         CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+        GCC_TREAT_WARNINGS_AS_ERRORS=NO \
+        WARNING_CFLAGS="-Wno-error -Wno-thread-safety -Wno-thread-safety-attributes -Wno-thread-safety-analysis" \
+        OTHER_CFLAGS="\$(inherited) -Wno-error -Wno-thread-safety -Wno-thread-safety-attributes -Wno-thread-safety-analysis" \
+        OTHER_CPLUSPLUSFLAGS="\$(inherited) -Wno-error -Wno-thread-safety -Wno-thread-safety-attributes -Wno-thread-safety-analysis" \
         WK_AVAILABILITY_OVERLAY_FLAGS="" WK_AVAILABILITY_OVERLAY_SWIFT_FLAGS="" \
         IPHONEOS_DEPLOYMENT_TARGET="16.4" \
         ${ldflags[@]+"${ldflags[@]}"} \
