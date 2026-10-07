@@ -19,6 +19,7 @@ TARGET=aarch64-apple-ios
 export IPHONEOS_DEPLOYMENT_TARGET=16.4
 
 cd "$CRATE"
+rustup target add "$TARGET" 2>/dev/null || true
 cargo build --release --locked --target "$TARGET"
 mkdir -p "$OUT"
 cp "target/$TARGET/release/libhusk_rppairing.a" "$OUT/libhusk_rppairing.a"
